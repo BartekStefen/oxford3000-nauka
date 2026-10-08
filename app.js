@@ -19,7 +19,7 @@ let LEVELS=[], W=[], BYID={}, BYLEVEL=[], EN_IDX={};
 /* ---------- stan / zapis ---------- */
 function fill(s){
   s=s||{}; s.p=s.p||{}; s.days=s.days||{}; s.tot=s.tot||{a:0,ok:0}; s.best=s.best||0; s.fis=s.fis||{};
-  s.set=Object.assign({auto:true,dir:'pl-en',theme:'auto',rate:1,learnN:7,writeN:20},s.set||{}); return s;
+  s.set=Object.assign({auto:true,dir:'pl-en',theme:'auto',rate:1,learnN:7,writeN:20,fisN:20},s.set||{}); return s;
 }
 function load(){ try{ const s=JSON.parse(localStorage.getItem(KEY)); if(s&&s.p) return fill(s);}catch(e){} return fill({}); }
 let S=load();
@@ -36,9 +36,11 @@ function streak(){
 }
 function record(ok){ const k=dkey(new Date()); S.days[k]=(S.days[k]||0)+1; S.tot.a++; if(ok) S.tot.ok++; const s=streak(); if(s>S.best) S.best=s; }
 /* efekty odpowiedzi; kind: mc | type | flash | test */
-function markOk(id,kind){
+function markOk(id,kind,firstTry=true){
   const p=P(id); p.r=(p.r||0)+1; p.t=Date.now();
-  if(kind==='type'){ if(p.s<2){ p.s=2; p.iv=1; p.due=Date.now()+DAY; } if(p.h){ p.cc=(p.cc||0)+1; if(p.cc>=2){ p.h=0; p.cc=0; } } }
+  if(kind==='type'){
+    if(p.h&&!firstTry){ if(p.s<1) p.s=1; }            /* poprawione dopiero po błędzie w tej rundzie → wraca w kolejnych rundach */
+    else { if(p.s<2){ p.s=2; p.iv=1; p.due=Date.now()+DAY; } p.h=0; p.cc=0; } }
   else if(p.s<1) p.s=1;
   record(true); save();
 }
@@ -232,6 +234,7 @@ function scrFis(l){
     if(answer.done) return; answer.done=true;
     F.hist=F.hist||[]; F.hist.push({id:w.id,ok,snap:snapP(w.id),tot:{...S.tot},days:{...S.days}}); if(F.hist.length>30) F.hist.shift();
     if(ok){ F.k.push(w.id); markOk(w.id,'flash'); } else { F.u.push(w.id); markBad(w.id); }
+    if(F.pass){ const ps=passSeen('fis',l); if(!ps.includes(w.id)) ps.push(w.id); }
     F.i++; F.autoNext=true; save();
     sw.classList.add('anim'); sw.style.transform=`translateX(${ok?130:-130}%) rotate(${ok?18:-18}deg)`; sw.style.opacity='0';
     setTimeout(()=>scrFis(l),260);
@@ -247,7 +250,7 @@ function scrFis(l){
     if(adx<8&&Date.now()-t0<600&&e.type==='pointerup') flip(); };
   sw.addEventListener('pointerup',end); sw.addEventListener('pointercancel',end);
   $('#fyes').onclick=()=>answer(true); $('#fno').onclick=()=>answer(false);
-  $('#fundo').onclick=()=>{ const hh=F.hist&&F.hist.pop(); if(!hh) return; restoreP(hh.id,hh.snap,hh.tot,hh.days); F.i=Math.max(0,F.i-1); (hh.ok?F.k:F.u).pop(); F.autoNext=false; save(); scrFis(l); };
+  $('#fundo').onclick=()=>{ const hh=F.hist&&F.hist.pop(); if(!hh) return; restoreP(hh.id,hh.snap,hh.tot,hh.days); if(F.pass){ const ps=passSeen('fis',l), k=ps.lastIndexOf(hh.id); if(k>-1) ps.splice(k,1); } F.i=Math.max(0,F.i-1); (hh.ok?F.k:F.u).pop(); F.autoNext=false; save(); scrFis(l); };
   $('#fopt').onclick=()=>fisMenu(l);
   document.onkeydown=e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); flip(); } else if(e.key==='ArrowRight') answer(true); else if(e.key==='ArrowLeft') answer(false); };
 }
@@ -266,12 +269,14 @@ function fisEnd(l){
   const F=S.fis[l]; const k=F.k.length,u=[...new Set(F.u)];
   app().innerHTML=`${closeTop('Fiszki',`l/${l}`)}
   <div class="confetti">${u.length?'💪':'🎉'}</div><div class="res">${k} / ${F.ids.length}</div><div class="center muted">kart oznaczonych jako „umiem”</div>
-  ${u.length?`<button class="btn" id="fu">Ucz się nieumianych (${u.length})</button>`:''}
+  ${F.pass?`<button class="btn" id="fnext">Następne karty (${S.set.fisN})</button>`:''}
+  ${u.length?`<button class="btn ${F.pass?'sec2':''}" id="fu">Ucz się nieumianych (${u.length})</button>`:''}
   <button class="btn sec2" data-rep="s/learn/${l}">🎯 Przejdź do trybu Nauka</button>
-  <button class="btn sec2" id="fre">Zacznij od nowa</button>
+  <button class="btn sec2" id="fre">Ustawienia sesji</button>
   <button class="btn ghost" data-back="l/${l}">Wróć do poziomu</button>`;
-  if(u.length) $('#fu').onclick=()=>{ S.fis[l]={ids:shuffle(u),i:0,k:[],u:[],opt:F.opt,hist:[]}; save(); scrFis(l); };
+  if(u.length) $('#fu').onclick=()=>{ S.fis[l]={ids:shuffle(u),i:0,k:[],u:[],opt:F.opt,hist:[],pass:false}; save(); scrFis(l); };
   $('#fre').onclick=()=>{ delete S.fis[l]; save(); goReplace('s/fis/'+l); };
+  const fn=$('#fnext'); if(fn) fn.onclick=()=>{ if(!startFis(l,F.opt,1)) toast('Brak kolejnych kart'); else scrFis(l); };
 }
 
 /* ---------- NAUKA (jak Learn: wybór → wpisywanie → opanowane) ---------- */
@@ -283,14 +288,14 @@ function scrLearn(l,fresh=true){
   let ids;
   if(rev){ ids=dueIds().slice(0,15); if(!ids.length){ app().innerHTML=`${closeTop('Powtórki','')}<div class="confetti">🌟</div><h3 class="center">Nie masz nic do powtórki</h3><p class="center muted">Słówka, w których się pomylisz albo które opanujesz, wrócą tu do powtórki po 1, 3, 7… dniach.</p><button class="btn" data-go="">Wróć</button>`; return; } }
   else {
-    if(!LP||LP.l!==l||fresh){ LP={l,pool:pickIds(l,getPick('learn'),'learn'),done:[]}; }
-    const rest=LP.pool.filter(id=>!LP.done.includes(id));
-    ids=rest.slice(0,S.set.learnN);
+    if(fresh||!LP||LP.l!==l){ const o=getPick('learn'); LP={l,o,rounds:o.r==='norm'?0:+o.r,done:0,words:0}; }
+    const R=buildRound('learn',l,LP.o,S.set.learnN); ids=R.ids;
+    if(R.reset) toast('Przerobiłeś wszystkie słówka – nowe przejście od początku');
     if(!ids.length){
       const allM=BYLEVEL[l].every(w=>st(w.id)===2);
-      app().innerHTML=`${closeTop('Nauka',`l/${l}`)}<div class="confetti">🏆</div><h3 class="center">${LP.pool.length?(allM?'Opanowałeś cały poziom!':'Wybrane słówka przerobione!'):'Brak słówek w tym wyborze'}</h3><p class="center muted">${LP.pool.length?'Teraz rób powtórki i testy, żeby nie zapomnieć.':'Zmień ustawienia sesji.'}</p><button class="btn" data-rep="s/learn/${l}">Wybierz słówka</button><button class="btn sec2" data-go="rev">🔁 Powtórki</button><button class="btn sec2" data-rep="s/test/${l}">📝 Test</button>`; LP=null; return; }
+      app().innerHTML=`${closeTop('Nauka',`l/${l}`)}<div class="confetti">🏆</div><h3 class="center">${allM?'Opanowałeś cały poziom!':'Brak słówek w tym wyborze'}</h3><p class="center muted">${allM?'Teraz rób powtórki i testy, żeby nie zapomnieć.':'Zmień ustawienia sesji.'}</p><button class="btn" data-rep="s/learn/${l}">Ustawienia sesji</button><button class="btn sec2" data-go="rev">🔁 Powtórki</button><button class="btn sec2" data-rep="s/test/${l}">📝 Test</button>`; LP=null; return; }
   }
-  LS={l,rev,ids,stg:{},q:shuffle(ids),first:{},title:rev?'Powtórki':'Nauka'};
+  LS={l,rev,ids,stg:{},q:shuffle(ids),first:{},bad:new Set(),title:rev?'Powtórki':'Nauka'};
   ids.forEach(id=>LS.stg[id]=rev?1:Math.min(st(id),1));
   learnNext();
 }
@@ -342,33 +347,34 @@ const PRAISE=['Świetnie!','Dobrze!','Brawo!','Super!','Tak jest!','Idealnie!'];
 function pickPraise(){ return PRAISE[Math.floor(Math.random()*PRAISE.length)]; }
 function learnAnswer(ok,kind,typed,res){
   const id=LS.q[0], w=BYID[id];
-  const snap={p:snapP(id),tot:{...S.tot},days:{...S.days},q:LS.q.slice(),stg:{...LS.stg},first:{...LS.first}};
+  const snap={p:snapP(id),tot:{...S.tot},days:{...S.days},q:LS.q.slice(),stg:{...LS.stg},first:{...LS.first},bad:new Set(LS.bad)};
   const apply=(ok)=>{
     LS.q.shift();
     const firstTime=!(id in LS.first); if(firstTime) LS.first[id]=ok;
-    if(ok){ LS.stg[id]++; markOk(id,kind); if(LS.rev&&firstTime&&LS.stg[id]>=2) srsOk(id);
+    if(ok){ LS.stg[id]++; markOk(id,kind,!LS.bad.has(id)); if(LS.rev&&firstTime&&LS.stg[id]>=2) srsOk(id);
       if(LS.stg[id]<2) LS.q.splice(Math.min(LS.q.length,3),0,id); }
-    else { LS.stg[id]=Math.max(0,LS.stg[id]-1); markBad(id); LS.q.splice(Math.min(LS.q.length,2),0,id); }
+    else { LS.bad.add(id); LS.stg[id]=Math.max(0,LS.stg[id]-1); markBad(id); LS.q.splice(Math.min(LS.q.length,2),0,id); }
   };
   apply(ok);
   const fbx=$('#fbx'); fbx.innerHTML=feedbackHTML(ok,w,typed,res,!ok&&kind==='type'&&typed&&typed.trim());
   $('.pbar i').style.width=learnProgress()*100+'%';
   if(S.set.auto) play(w.wa);
   $('#nx').onclick=()=>learnNext();
-  const ov=$('#ovr'); if(ov) ov.onclick=()=>{ restoreP(id,snap.p,snap.tot,snap.days); LS.q=snap.q; LS.stg=snap.stg; LS.first=snap.first; apply(true); toast('Zaliczone ✓'); learnNext(); };
+  const ov=$('#ovr'); if(ov) ov.onclick=()=>{ restoreP(id,snap.p,snap.tot,snap.days); LS.q=snap.q; LS.stg=snap.stg; LS.first=snap.first; LS.bad=snap.bad; apply(true); toast('Zaliczone ✓'); learnNext(); };
   setTimeout(()=>{ const nx=$('#nx'); if(nx) nx.scrollIntoView({block:'nearest',behavior:'smooth'}); },50);
 }
 function learnEnd(){
   const n=LS.ids.length, firstOk=Object.values(LS.first).filter(Boolean).length;
-  const back=LS.rev?'':`l/${LS.l}`; if(!LS.rev&&LP) LS.ids.forEach(id=>{ if(!LP.done.includes(id)) LP.done.push(id); }); const more=LS.rev?dueIds().length:(LP?LP.pool.length-LP.done.length:0);
+  const back=LS.rev?'':`l/${LS.l}`; let more, sessDone=false;
+  if(LS.rev) more=dueIds().length; else { if(LP){ LP.done++; LP.words+=n; } more=LP?availCount('learn',LS.l,LP.o):0; sessDone=!!(LP&&LP.rounds&&LP.done>=LP.rounds); }
   const s=LS.rev?null:levelStats(LS.l);
-  app().innerHTML=`${closeTop(LS.title,back)}<div class="confetti">🎉</div><div class="res">${n} ${n===1?'słówko':'słówek'}</div>
-  <div class="center muted">${LS.rev?'powtórzonych':'przerobionych w tej rundzie'} · za pierwszym razem dobrze: ${firstOk}/${n}</div>
+  app().innerHTML=`${closeTop(LS.title,back)}<div class="confetti">🎉</div>${sessDone?`<h3 class="center" style="margin:4px 0">Sesja ukończona: ${LP.done} ${plural(LP.done,'runda','rundy','rund')}, ${LP.words} słówek</h3>`:''}<div class="res">${n} ${n===1?'słówko':'słówek'}</div>
+  <div class="center muted">${LS.rev?'powtórzonych':`w rundzie ${LP?LP.done:1}${LP&&LP.rounds?'/'+LP.rounds:''}`} · za pierwszym razem dobrze: ${firstOk}/${n}</div>
   ${s?`<div class="tile" style="margin-top:16px">${bar(s)}<div class="s">Poziom ${esc(LEVELS[LS.l].name)}: ${s.m}/${s.n} opanowanych</div></div>`:''}
   <div class="detbox" style="text-align:left">${LS.ids.map(id=>{ const w=BYID[id]; return `<div class="wi"><span class="dot ${LS.first[id]?'m':'h'}"></span><div class="x"><div class="a">${esc(w.w)}</div><div class="b">${esc(w.pl)}</div></div>${audBtn(w.wa,1)}</div>`; }).join('')}</div>
-  ${more?`<button class="btn" id="again">${LS.rev?`Kolejne powtórki (${more})`:`Następna runda (zostało ${more})`}</button>`:''}
+  ${more?`<button class="btn" id="again">${LS.rev?`Kolejne powtórki (${more})`:sessDone?'Jeszcze jedna runda':`Następna runda${LP&&LP.rounds?` (${LP.done+1}/${LP.rounds})`:''}`}</button>`:''}
   <button class="btn ghost" data-back="${back}">Zakończ</button>`;
-  const a=$('#again'); if(a) a.onclick=()=>scrLearn(LS.rev?'rev':LS.l,false);
+  const a=$('#again'); if(a) a.onclick=()=>{ if(sessDone&&LP) LP.rounds++; scrLearn(LS.rev?'rev':LS.l,false); };
   document.onkeydown=e=>{ if(e.key==='Enter'&&a) a.click(); };
 }
 
@@ -377,10 +383,10 @@ let WS=null;
 let WP=null;
 function scrWrite(l,fresh=true){
   if(!LEVELS[l]) return go('');
-  if(!WP||WP.l!==l||fresh) WP={l,pool:pickIds(l,getPick('write'),'write'),done:[]};
-  const ids=WP.pool.filter(id=>!WP.done.includes(id)).slice(0,S.set.writeN);
-  if(!ids.length){ app().innerHTML=`${closeTop('Pisanie',`l/${l}`)}<div class="confetti">${WP.pool.length?'🏆':'🤷'}</div><h3 class="center">${WP.pool.length?'Wybrane słówka przerobione!':'Brak słówek w tym wyborze'}</h3><button class="btn" data-rep="s/write/${l}">Wybierz słówka</button><button class="btn ghost" data-back="l/${l}">Wróć do poziomu</button>`; WP=null; return; }
-  ids.forEach(id=>WP.done.push(id));
+  if(fresh||!WP||WP.l!==l){ const o=getPick('write'); WP={l,o,rounds:o.r==='norm'?0:+o.r,done:0,words:0}; }
+  const R=buildRound('write',l,WP.o,S.set.writeN); const ids=R.ids;
+  if(R.reset) toast('Przerobiłeś wszystkie słówka – nowe przejście od początku');
+  if(!ids.length){ app().innerHTML=`${closeTop('Pisanie',`l/${l}`)}<div class="confetti">🏆</div><h3 class="center">Brak słówek w tym wyborze</h3><button class="btn" data-rep="s/write/${l}">Ustawienia sesji</button><button class="btn ghost" data-back="l/${l}">Wróć do poziomu</button>`; WP=null; return; }
   WS={l,round:1,q:shuffle(ids),wrong:[],ids,firstOk:{},done:0};
   writeNext();
 }
@@ -395,7 +401,7 @@ function writeNext(){
   <div class="qcard"><div class="lab"><span>${pl2en()?'Wpisz po angielsku':'Wpisz po polsku'}</span><span>${isHard(id)?'❗ trudne':''}</span></div><div class="prompt">${esc(promptOf(w))}</div><div class="pos">${pl2en()?esc(w.pp):esc(w.i)} ${!pl2en()?audBtn(w.wa,1):''}</div></div>${typeBox()}<div id="fbx"></div>`;
   bindType(w,(ok,typed,res)=>{
     const snap={p:snapP(id),tot:{...S.tot},days:{...S.days},fo:{...WS.firstOk},wrong:WS.wrong.slice()};
-    const apply=ok=>{ if(!(id in WS.firstOk)) WS.firstOk[id]=ok; if(ok){ markOk(id,'type'); } else { markBad(id); WS.wrong.push(id); } };
+    const apply=ok=>{ if(!(id in WS.firstOk)) WS.firstOk[id]=ok; if(ok){ markOk(id,'type',WS.firstOk[id]!==false); } else { markBad(id); WS.wrong.push(id); } };
     apply(ok);
     $('#fbx').innerHTML=feedbackHTML(ok,w,typed,res,!ok&&typed&&typed.trim());
     if(S.set.auto) play(w.wa);
@@ -406,10 +412,12 @@ function writeNext(){
 }
 function writeEnd(){
   const n=WS.ids.length, ok=Object.values(WS.firstOk).filter(Boolean).length;
+  if(WP){ WP.done++; WP.words+=n; } const more=WP?availCount('write',WS.l,WP.o):0, sessDone=!!(WP&&WP.rounds&&WP.done>=WP.rounds);
   app().innerHTML=`${closeTop('Pisanie',`l/${WS.l}`)}<div class="confetti">${ok===n?'🏆':'✍️'}</div><div class="res">${Math.round(ok/n*100)}%</div><div class="center muted">za pierwszym razem dobrze: ${ok}/${n}</div>
   <div class="detbox" style="text-align:left">${WS.ids.map(id=>{ const w=BYID[id]; return `<div class="wi"><span class="dot ${WS.firstOk[id]?'m':'h'}"></span><div class="x"><div class="a">${esc(w.w)}</div><div class="b">${esc(w.pl)}</div></div>${audBtn(w.wa,1)}</div>`; }).join('')}</div>
-  ${WP&&WP.pool.length>WP.done.length?`<button class="btn" id="again">Kolejne słówka (zostało ${WP.pool.length-WP.done.length})</button>`:`<button class="btn" data-rep="s/write/${WS.l}">Nowa sesja</button>`}<button class="btn ghost" data-back="l/${WS.l}">Zakończ</button>`;
-  const ag=$('#again'); if(ag) ag.onclick=()=>scrWrite(WS.l,false);
+  ${sessDone?`<h3 class="center">Sesja ukończona: ${WP.done} ${plural(WP.done,'runda','rundy','rund')}, ${WP.words} słówek</h3>`:''}
+  ${more?`<button class="btn" id="again">${sessDone?'Jeszcze jedna runda':`Kolejne słówka${WP&&WP.rounds?` (runda ${WP.done+1}/${WP.rounds})`:''}`}</button>`:`<button class="btn" data-rep="s/write/${WS.l}">Ustawienia sesji</button>`}<button class="btn ghost" data-back="l/${WS.l}">Zakończ</button>`;
+  const ag=$('#again'); if(ag) ag.onclick=()=>{ if(sessDone&&WP) WP.rounds++; scrWrite(WS.l,false); };
 }
 
 /* ---------- TEST ---------- */
@@ -429,7 +437,47 @@ function scrTest(l){
 
 /* ---------- WYBÓR SŁÓWEK PRZED SESJĄ (jak w Quizlecie) ---------- */
 const MODE_NAME={fis:'Fiszki',learn:'Nauka',write:'Pisanie',test:'Test'}, MODE_EMO={fis:'🃏',learn:'🎯',write:'⌨️',test:'📝'};
-const PICK_DEF={fis:{n:'all',order:'seq',range:'all'},learn:{n:'all',order:'seq',range:'todo'},write:{n:'all',order:'seq',range:'todo'},test:{n:20,order:'shuf',range:'all'}};
+const PICK_DEF={fis:{r:'norm',order:'seq',range:'all'},learn:{r:'norm',order:'seq',range:'all'},write:{r:'norm',order:'seq',range:'all'},test:{n:20,order:'shuf',range:'all'}};
+const R_PRESETS=[1,2,3,5,10], WRONG_MAX=2;
+function plural(n,a,b,c){ const d=n%10, dd=n%100; return n===1?a:(d>=2&&d<=4&&!(dd>=12&&dd<=14))?b:c; }
+function roundSize(mode){ return mode==='learn'?S.set.learnN:mode==='write'?S.set.writeN:S.set.fisN; }
+function passSeen(mode,l){ S.seen=S.seen||{}; S.seen[mode]=S.seen[mode]||{}; return S.seen[mode][l]=S.seen[mode][l]||[]; }
+/* błędne, jeszcze nieopanowane słówka – najdawniej ćwiczone najpierw */
+function wrongWords(l){ return BYLEVEL[l].filter(w=>{ const p=S.p[w.id]; return p&&p.h&&p.s<2; }).sort((a,b)=>(S.p[a.id].t||0)-(S.p[b.id].t||0)); }
+/* skąd biorą się nowe słówka dla trybu; usePass = przechodzimy po kolei z zapamiętanym miejscem (bez powtórek) */
+function roundBase(mode,l,o){
+  if(o.range==='hard') return {base:wrongWords(l).concat(BYLEVEL[l].filter(w=>isHard(w.id)&&st(w.id)===2)),usePass:false,mix:false};
+  if(o.range==='seen') return {base:BYLEVEL[l].filter(w=>S.p[w.id]),usePass:true,mix:false};
+  if(mode==='fis') return {base:o.range==='todo'?BYLEVEL[l].filter(w=>st(w.id)<2):BYLEVEL[l].slice(),usePass:true,mix:true};
+  if(mode==='write'&&o.range==='all') return {base:BYLEVEL[l].filter(w=>!(isHard(w.id)&&st(w.id)<2)),usePass:true,mix:true};
+  /* Nauka (Wszystkie/Nieumiane) i Pisanie (Nieumiane): nowe = jeszcze nieopanowane i bez błędów; opanowane nie wracają */
+  return {base:BYLEVEL[l].filter(w=>st(w.id)<2&&!isHard(w.id)),usePass:false,mix:true};
+}
+function availCount(mode,l,o){ const B=roundBase(mode,l,o); const ps=B.usePass?new Set(passSeen(mode,l)):null;
+  return (ps&&B.base.every(w=>ps.has(w.id))?B.base.length:B.base.filter(w=>!ps||!ps.has(w.id)).length)+(B.mix?wrongWords(l).length:0); }
+/* jedna runda: głównie NOWE słówka (dalej od miejsca, gdzie skończyłeś) + maks. 2 błędne, wmieszane losowo */
+function buildRound(mode,l,o,R,exclude){
+  exclude=exclude||new Set(); const B=roundBase(mode,l,o); let reset=false;
+  const seen=B.usePass?new Set(passSeen(mode,l)):new Set();
+  if(B.usePass&&B.base.length&&B.base.every(w=>seen.has(w.id))){ S.seen[mode][l]=[]; seen.clear(); reset=true; }
+  let cand=B.base.filter(w=>!seen.has(w.id)&&!exclude.has(w.id));
+  if(o.order==='shuf'&&o.range!=='hard') cand=shuffle(cand);
+  const wrong=B.mix?wrongWords(l).filter(w=>!exclude.has(w.id)):[];
+  let wPart=wrong.slice(0,Math.min(WRONG_MAX,R));
+  const fresh=cand.filter(w=>!wPart.includes(w)).slice(0,R-wPart.length);
+  if(fresh.length+wPart.length<R) wPart=wrong.slice(0,R-fresh.length);   /* nowe się skończyły → więcej poprawek */
+  const ids=fresh.map(w=>w.id);
+  for(const w of wPart){ ids.splice(Math.floor(Math.random()*(ids.length+1)),0,w.id); }
+  if(B.usePass&&mode!=='fis'){ const ps=passSeen(mode,l); fresh.forEach(w=>{ if(!ps.includes(w.id)) ps.push(w.id); }); }
+  save(); return {ids,nNew:fresh.length,nWrong:wPart.length,reset};
+}
+function startFis(l,o,rounds){
+  const ex=new Set(); let ids=[], reset=false;
+  for(let r=0;r<rounds;r++){ const R=buildRound('fis',l,o,S.set.fisN,ex); if(R.reset) reset=true; if(!R.ids.length) break; R.ids.forEach(id=>ex.add(id)); ids=ids.concat(R.ids); }
+  if(reset) toast('Przejrzałeś wszystkie karty – nowe przejście od początku');
+  if(!ids.length) return false;
+  S.fis[l]={ids,i:0,k:[],u:[],opt:{order:o.order,range:o.range},hist:[],pass:true}; save(); return true;
+}
 const N_PRESETS=[10,20,30,50,100];
 function getPick(m){ S.set.pick=S.set.pick||{}; return Object.assign({},PICK_DEF[m],S.set.pick[m]||{}); }
 function rangeWords(l,range){ return BYLEVEL[l].filter(w=>range==='all'||(range==='todo'&&st(w.id)<2)||(range==='hard'&&isHard(w.id))||(range==='seen'&&!!S.p[w.id])); }
@@ -445,13 +493,17 @@ function scrSetup(mode,l){
   const t=Object.assign({mc:true,wr:true,tf:true},S.set.test||{});
   const cnt=r=>rangeWords(l,r).length;
   const ranges=[['all','Wszystkie'],['todo','Tylko nieumiane'],['hard','Tylko trudne'],['seen','Już ćwiczone']];
-  const isPreset=o.n==='all'||N_PRESETS.includes(+o.n);
+  const isT=mode==='test';
+  const isPreset=isT?(o.n==='all'||N_PRESETS.includes(+o.n)):(o.r==='norm'||R_PRESETS.includes(+o.r));
   app().innerHTML=`${closeTop(`${MODE_EMO[mode]} ${MODE_NAME[mode]}`,`l/${l}`)}
   <h3 style="margin:4px 0 10px">${LV_EMO[l]} ${esc(L.name)}</h3>
   ${F&&F.ids&&F.ids.length&&F.i<F.ids.length?`<button class="tile" id="pcont"><div class="row"><span style="font-size:22px">▶️</span><span class="t">Kontynuuj poprzednią sesję</span><span class="badge">${F.i+1}/${F.ids.length}</span></div></button>`:''}
-  <div class="sec">Ile słówek?</div>
-  <div class="nchips" id="pn"><button class="nchip wide" data-v="all">${mode==='test'?'Wszystkie':'Wszystkie (normalnie)'}</button>${N_PRESETS.map(n=>`<button class="nchip" data-v="${n}">${n}</button>`).join('')}</div>
-  <input class="tin" id="pc" type="number" inputmode="numeric" pattern="[0-9]*" min="1" placeholder="Własna liczba, np. 15" value="${isPreset?'':esc(o.n)}" style="margin-top:10px" aria-label="Własna liczba słówek">
+  ${isT?`<div class="sec">Ile pytań?</div>
+  <div class="nchips" id="pn"><button class="nchip wide" data-v="all">Wszystkie</button>${N_PRESETS.map(n=>`<button class="nchip" data-v="${n}">${n}</button>`).join('')}</div>
+  <input class="tin" id="pc" type="number" inputmode="numeric" pattern="[0-9]*" min="1" placeholder="Własna liczba pytań, np. 15" value="${isPreset?'':esc(o.n)}" style="margin-top:10px" aria-label="Własna liczba pytań">`
+  :`<div class="sec">Ile rund?</div>
+  <div class="nchips" id="pn"><button class="nchip wide" data-v="norm">Normalnie (domyślnie)</button>${R_PRESETS.map(n=>`<button class="nchip" data-v="${n}">${n}</button>`).join('')}</div>
+  <input class="tin" id="pc" type="number" inputmode="numeric" pattern="[0-9]*" min="1" placeholder="Własna liczba rund, np. 4" value="${isPreset?'':esc(o.r)}" style="margin-top:10px" aria-label="Własna liczba rund">`}
   <div class="sec">Które słówka?</div>
   <div class="nchips" id="pr">${ranges.map(r=>`<button class="nchip" data-v="${r[0]}">${r[1]} <span class="cnt">${cnt(r[0])}</span></button>`).join('')}</div>
   <div class="sec">Kolejność</div>
@@ -465,23 +517,29 @@ function scrSetup(mode,l){
   <button class="btn" id="pgo">${mode==='test'?'Rozpocznij test':'Start'}</button>
   <button class="btn ghost" data-back="l/${l}">Anuluj</button>`;
   const sync=()=>{
-    $$('#pn .nchip').forEach(b=>b.classList.toggle('on',String(o.n)===b.dataset.v));
+    $$('#pn .nchip').forEach(b=>b.classList.toggle('on',String(isT?o.n:o.r)===b.dataset.v));
     $$('#pr .nchip').forEach(b=>b.classList.toggle('on',o.range===b.dataset.v));
     $$('#po .nchip').forEach(b=>b.classList.toggle('on',o.order===b.dataset.v));
-    const av=cnt(o.range); const n=o.n==='all'?av:Math.min(parseInt(o.n,10)||0,av);
-    $('#psum').innerHTML=av?`${mode==='test'?'Pytań':'Słówek w sesji'}: <b>${n}</b> z ${av} dostępnych${mode==='learn'&&n>S.set.learnN?` · rundy po ${S.set.learnN}`:''}${mode==='write'&&n>S.set.writeN?` · rundy po ${S.set.writeN}`:''}`:'Brak słówek w tym wyborze – wybierz inne.';
-    $('#pgo').disabled=!av||!n;
+    if(isT){ const av=cnt(o.range); const n=o.n==='all'?av:Math.min(parseInt(o.n,10)||0,av);
+      $('#psum').innerHTML=av?`Pytań: <b>${n}</b> z ${av} dostępnych słówek`:'Brak słówek w tym wyborze – wybierz inne.'; $('#pgo').disabled=!av||!n; return; }
+    const R=roundSize(mode), av=availCount(mode,l,o), wr=wrongWords(l).length, B=roundBase(mode,l,o);
+    const word=mode==='fis'?'kart':'słówek';
+    let h=o.r==='norm'?`Rundy po <b>${R}</b> ${word}${B.mix?' – głównie nowe + maks. 2 błędne':''}. Po każdej rundzie grasz dalej albo kończysz.`
+      :`<b>${o.r}</b> ${plural(+o.r,'runda','rundy','rund')} × ${R} = <b>${o.r*R}</b> ${word}${B.mix?' (w każdej rundzie maks. 2 błędne)':''}`;
+    const ps=B.usePass?new Set(passSeen(mode,l)):null, left=B.base.filter(w=>!ps||!ps.has(w.id)).length;
+    h+=`<br>${B.usePass?`Zostało w tym przejściu: <b>${left}</b> z ${B.base.length} – zaczniesz tam, gdzie skończyłeś`:`Nowych do nauki: <b>${B.base.length}</b>`}${B.mix?` · błędnych do poprawy: <b>${wr}</b>`:''}`;
+    $('#psum').innerHTML=av?h:'Brak słówek w tym wyborze – wybierz inne.'; $('#pgo').disabled=!av;
   };
-  $$('#pn .nchip').forEach(b=>b.onclick=()=>{ o.n=b.dataset.v==='all'?'all':+b.dataset.v; $('#pc').value=''; sync(); });
-  $('#pc').oninput=e=>{ const v=parseInt(e.target.value,10); if(v>0){ o.n=v; } else if(!N_PRESETS.includes(+o.n)) o.n='all'; sync(); };
+  $$('#pn .nchip').forEach(b=>b.onclick=()=>{ const v=b.dataset.v; if(isT) o.n=v==='all'?'all':+v; else o.r=v==='norm'?'norm':+v; $('#pc').value=''; sync(); });
+  $('#pc').oninput=e=>{ const v=Math.min(parseInt(e.target.value,10)||0,isT?5000:100); if(isT){ if(v>0) o.n=v; else if(!N_PRESETS.includes(+o.n)) o.n='all'; } else { if(v>0) o.r=v; else if(!R_PRESETS.includes(+o.r)) o.r='norm'; } sync(); };
   $$('#pr .nchip').forEach(b=>b.onclick=()=>{ o.range=b.dataset.v; sync(); });
   $$('#po .nchip').forEach(b=>b.onclick=()=>{ o.order=b.dataset.v; sync(); });
   $$('.sw[data-k]').forEach(b=>b.onclick=()=>{ t[b.dataset.k]=!t[b.dataset.k]; b.classList.toggle('on',t[b.dataset.k]); });
   const pc=$('#pcont'); if(pc) pc.onclick=()=>goReplace('fis/'+l);
   $('#pgo').onclick=()=>{
     if(mode==='test'&&!t.mc&&!t.wr&&!t.tf){ toast('Wybierz co najmniej jeden rodzaj pytań'); return; }
-    S.set.pick=S.set.pick||{}; S.set.pick[mode]={n:o.n,order:o.order,range:o.range}; if(mode==='test') S.set.test=t; save();
-    if(mode==='fis'){ const ids=pickIds(l,o,'fis'); S.fis[l]={ids,i:0,k:[],u:[],opt:{order:o.order,range:o.range},hist:[]}; save(); }
+    S.set.pick=S.set.pick||{}; S.set.pick[mode]=isT?{n:o.n,order:o.order,range:o.range}:{r:o.r,order:o.order,range:o.range}; if(isT) S.set.test=t; save();
+    if(mode==='fis'&&!startFis(l,o,o.r==='norm'?1:+o.r)){ toast('Brak kart w tym wyborze'); return; }
     goReplace(mode+'/'+l);
   };
   sync();
@@ -563,7 +621,8 @@ function scrSettings(){
    <div class="si"><div class="x">Tempo wymowy</div><div class="seg" id="srate">${[[0.75,'wolno'],[1,'normalnie']].map(r=>`<button data-v="${r[0]}" class="${s.rate===r[0]?'on':''}">${r[1]}</button>`).join('')}</div></div>
    <div class="si"><div class="x">Motyw</div><div class="seg" id="sth">${[['auto','auto'],['light','jasny'],['dark','ciemny']].map(r=>`<button data-v="${r[0]}" class="${s.theme===r[0]?'on':''}">${r[1]}</button>`).join('')}</div></div>
    <div class="si"><div class="x">Słówek w rundzie Nauki</div><div class="seg" id="sln">${[5,7,10].map(n=>`<button data-v="${n}" class="${s.learnN===n?'on':''}">${n}</button>`).join('')}</div></div>
-   <div class="si"><div class="x">Słówek w Pisaniu</div><div class="seg" id="swn">${[10,20,30].map(n=>`<button data-v="${n}" class="${s.writeN===n?'on':''}">${n}</button>`).join('')}</div></div>
+   <div class="si"><div class="x">Kart w rundzie Fiszek</div><div class="seg" id="sfn">${[10,20,30].map(n=>`<button data-v="${n}" class="${s.fisN===n?'on':''}">${n}</button>`).join('')}</div></div>
+   <div class="si"><div class="x">Słówek w rundzie Pisania</div><div class="seg" id="swn">${[10,20,30].map(n=>`<button data-v="${n}" class="${s.writeN===n?'on':''}">${n}</button>`).join('')}</div></div>
    <div class="si"><div class="x">Test dźwięku</div>${audBtn('w_1557.mp3')}</div>
   </div>
   <div class="sec">Offline (bez internetu)</div>
@@ -574,7 +633,7 @@ function scrSettings(){
   <div class="si"><div class="x" style="color:var(--bad)">Wyzeruj wszystkie postępy</div><button class="btn bad" style="width:auto;margin:0;min-height:42px" id="sres">Wyzeruj</button></div></div>
   <div class="center small muted" style="margin-top:10px">Słówka 3000 · lista Oxford 3000 (A1–B2) · 3805 kart · postępy zapisywane tylko na tym urządzeniu</div>`;
   const seg=(id,key,num)=>$$('#'+id+' button').forEach(b=>b.onclick=()=>{ s[key]=num?+b.dataset.v:b.dataset.v; save(); $$('#'+id+' button').forEach(x=>x.classList.toggle('on',x===b)); if(key==='theme') applyTheme(); });
-  seg('sdir','dir'); seg('srate','rate',1); seg('sth','theme'); seg('sln','learnN',1); seg('swn','writeN',1);
+  seg('sdir','dir'); seg('srate','rate',1); seg('sth','theme'); seg('sln','learnN',1); seg('swn','writeN',1); seg('sfn','fisN',1);
   $('#sauto').onclick=e=>{ s.auto=!s.auto; save(); e.currentTarget.classList.toggle('on',s.auto); };
   $$('[data-dl]').forEach(b=>b.onclick=()=>downloadLevel(+b.dataset.dl,b));
   $('#sres').onclick=()=>{ if(confirm('Na pewno wyzerować wszystkie postępy? Tego nie da się cofnąć.')){ const set=S.set; S=fill({set}); save(); toast('Wyzerowano'); scrSettings(); } };
