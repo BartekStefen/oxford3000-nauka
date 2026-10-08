@@ -75,10 +75,23 @@ function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.fl
 function pl2en(){ return S.set.dir!=='en-pl'; }
 function applyTheme(){ const t=S.set.theme; if(t==='auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme',t); }
 const LV_EMO=['🌱','🌿','🌳','🏔️','🚀','🏆'];
-function topBar(title,back,right){ return `<div class="top">${back?`<button class="ib" data-go="${back}" aria-label="Wstecz">${ICON.back}</button>`:''}<h2>${title}</h2>${right||'<span style="width:44px"></span>'}</div>`; }
-function closeTop(title,back,right){ return `<div class="top"><button class="ib" data-go="${back}" aria-label="Zamknij">${ICON.x}</button><h2>${title}</h2>${right||'<span style="width:44px"></span>'}</div>`; }
-document.addEventListener('click',e=>{ const b=e.target.closest('[data-go]'); if(b){ e.preventDefault(); go(b.dataset.go); } });
-function go(h){ if(location.hash==='#'+h || (h===''&&!location.hash)) route(); else location.hash=h; }
+/* nagłówek z zawsze widocznym przyciskiem Wstecz (back=null → brak, ''=ekran główny) */
+function backBtn(target){ return `<button class="bk" data-back="${esc(target)}" aria-label="Wstecz">${ICON.back}<span>Wstecz</span></button>`; }
+function topBar(title,back,right){ return `<div class="top">${back!=null?backBtn(back):'<span></span>'}<h2>${title}</h2><div class="tr">${right||''}</div></div>`; }
+function closeTop(title,back,right){ return topBar(title,back||'',right); }
+document.addEventListener('click',e=>{
+  const k=e.target.closest('[data-back]'); if(k){ e.preventDefault(); goBack(k.dataset.back); return; }
+  const r=e.target.closest('[data-rep]'); if(r){ e.preventDefault(); goReplace(r.dataset.rep); return; }
+  const b=e.target.closest('[data-go]'); if(b){ e.preventDefault(); go(b.dataset.go); } });
+/* historia: każdy ekran ma własny wpis (#hash → pushState), więc działa gest „przesuń wstecz” w Safari i przycisk Wstecz */
+const NAV=[]; let navReplace=false;
+function curHash(){ return location.hash.replace(/^#\/?/,''); }
+function navSync(){ const h=curHash();
+  if(navReplace){ navReplace=false; if(NAV.length) NAV[NAV.length-1]=h; else NAV.push(h); return; }
+  if(NAV.length>=2&&NAV[NAV.length-2]===h) NAV.pop(); else if(NAV[NAV.length-1]!==h) NAV.push(h); }
+function go(h){ if(curHash()===h) route(); else location.hash=h; }
+function goReplace(h){ if(curHash()===h){ route(); return; } navReplace=true; location.replace('#'+h); }
+function goBack(target){ if(NAV.length>=2&&NAV[NAV.length-2]===target) history.back(); else goReplace(target); }
 function bar(s){ const m=s.m/s.n*100, f=s.f/s.n*100; return `<div class="bar"><i class="m" style="width:${m}%"></i><i class="f" style="width:${f}%"></i></div>`; }
 /* Polskie warianty tłumaczenia */
 function plVariants(pl){ return pl.replace(/\([^)]*\)/g,'').split(/[,;\/]/).map(x=>normPL(x)).filter(Boolean); }
@@ -144,15 +157,16 @@ const app=()=>$('#app');
 let cleanup=null;
 function route(){
   if(cleanup){ try{cleanup();}catch(e){} cleanup=null; }
-  document.onkeydown=null; window.scrollTo(0,0);
-  const h=location.hash.replace(/^#\/?/,''); const [r,a]=h.split('/');
+  navSync(); closeSheet(); document.onkeydown=null; window.scrollTo(0,0);
+  const h=location.hash.replace(/^#\/?/,''); const [r,a,b]=h.split('/');
+  if(r==='s'&&PICK_DEF[a]&&b!==undefined&&!isNaN(+b)&&LEVELS[+b]) return scrSetup(a,+b);
   const l=a!==undefined&&a!==''&&!isNaN(+a)?+a:null;
   if(r==='l'&&l!==null) return scrLevel(l);
   if(r==='fis'&&l!==null) return scrFis(l);
   if(r==='learn'&&l!==null) return scrLearn(l);
   if(r==='rev') return scrLearn('rev');
   if(r==='write'&&l!==null) return scrWrite(l);
-  if(r==='test'&&l!==null) return scrTestSetup(l);
+  if(r==='test'&&l!==null) return scrTest(l);
   if(r==='list') return scrList(l);
   if(r==='stats') return scrStats();
   if(r==='set') return scrSettings();
@@ -163,7 +177,7 @@ window.addEventListener('hashchange',route);
 function scrHome(){
   const due=dueIds().length; const mast=Object.values(S.p).filter(p=>p.s===2).length;
   const today=S.days[dkey(new Date())]||0;
-  let h=`<div class="top"><h1>Słówka 3000</h1><button class="ib" data-go="stats" aria-label="Statystyki">${ICON.stats}</button><button class="ib" data-go="set" aria-label="Ustawienia">${ICON.gear}</button></div>
+  let h=`<div class="top home"><h1>Słówka 3000</h1><button class="ib" data-go="stats" aria-label="Statystyki">${ICON.stats}</button><button class="ib" data-go="set" aria-label="Ustawienia">${ICON.gear}</button></div>
   <div class="chips"><span class="chip">🔥 <b>${streak()}</b> ${dniTxt(streak())} z rzędu</span><span class="chip">✅ <b>${mast}</b> / ${W.length} opanowanych</span><span class="chip">📝 dziś: <b>${today}</b></span></div>`;
   if(!isStandalone()&&isIOS()&&!S.set.hideA2HS) h+=`<div class="banner">📲 <b>Dodaj do ekranu głównego:</b> w Safari stuknij <b>Udostępnij</b> (kwadrat ze strzałką) → <b>Do ekranu początkowego</b>. Wtedy aplikacja działa jak zwykła apka, a postępy nie znikną. <button class="lnk" id="hideA2">Ukryj</button></div>`;
   h+=`<button class="tile" data-go="rev"><div class="row"><span style="font-size:26px">🔁</span><span class="t">Powtórki i trudne słówka</span><span class="badge ${due?'n':''}">${due}</span></div><div class="s">${due?'Słówka, które sprawiły ci trudność albo czas je powtórzyć.':'Na razie nic do powtórki. Ucz się nowych słówek!'}</div></button>`;
@@ -184,10 +198,10 @@ function scrLevel(l){
   app().innerHTML=`${topBar(`${LV_EMO[l]} ${esc(L.name)}`,'',`<button class="ib" data-go="list/${l}" aria-label="Lista słówek">☰</button>`)}
   <div class="tile" style="cursor:default">${bar(s)}<div class="s">✅ ${s.m} opanowanych · 🟧 ${s.f} w trakcie · ⬜ ${s.n-s.m-s.f} nowych${s.h?` · ❗ ${s.h} trudnych`:''}</div></div>
   <div class="modes">
-    <button class="mode" data-go="fis/${l}"><span class="e">🃏</span><span class="t">Fiszki</span><span class="s">Obracaj karty, przesuwaj: umiem / nie umiem</span></button>
-    <button class="mode" data-go="learn/${l}"><span class="e">🎯</span><span class="t">Nauka</span><span class="s">Wybór odpowiedzi, potem wpisywanie – aż opanujesz</span></button>
-    <button class="mode" data-go="write/${l}"><span class="e">⌨️</span><span class="t">Pisanie</span><span class="s">Wpisuj angielskie słowa, sprawdzanie błędów</span></button>
-    <button class="mode" data-go="test/${l}"><span class="e">📝</span><span class="t">Test</span><span class="s">Sprawdź się – wynik na końcu</span></button>
+    <button class="mode" data-go="s/fis/${l}"><span class="e">🃏</span><span class="t">Fiszki</span><span class="s">Obracaj karty, przesuwaj: umiem / nie umiem</span></button>
+    <button class="mode" data-go="s/learn/${l}"><span class="e">🎯</span><span class="t">Nauka</span><span class="s">Wybór odpowiedzi, potem wpisywanie – aż opanujesz</span></button>
+    <button class="mode" data-go="s/write/${l}"><span class="e">⌨️</span><span class="t">Pisanie</span><span class="s">Wpisuj angielskie słowa, sprawdzanie błędów</span></button>
+    <button class="mode" data-go="s/test/${l}"><span class="e">📝</span><span class="t">Test</span><span class="s">Sprawdź się – wynik na końcu</span></button>
     <button class="mode" data-go="list/${l}"><span class="e">📚</span><span class="t">Lista słówek</span><span class="s">Przeglądaj, szukaj, słuchaj</span></button>
     <button class="mode" data-go="rev"><span class="e">🔁</span><span class="t">Powtórki</span><span class="s">Trudne i zaległe słówka</span></button>
   </div>`;
@@ -197,7 +211,7 @@ function scrLevel(l){
 function scrFis(l){
   if(!LEVELS[l]) return go('');
   let F=S.fis[l];
-  if(!F||!F.ids||!F.ids.length){ return fisSetup(l); }
+  if(!F||!F.ids||!F.ids.length){ goReplace('s/fis/'+l); return; }
   if(F.i>=F.ids.length) return fisEnd(l);
   const w=BYID[F.ids[F.i]]; let flipped=false;
   const front=pl2en()?`<div class="big">${esc(w.pl)}</div><div class="pos">${esc(w.pp)}</div>`:`<div class="big">${esc(w.w)}</div><div class="pos">${esc(w.i)}</div><div style="margin-top:14px">${audBtn(w.wa)}</div>`;
@@ -234,28 +248,17 @@ function scrFis(l){
   sw.addEventListener('pointerup',end); sw.addEventListener('pointercancel',end);
   $('#fyes').onclick=()=>answer(true); $('#fno').onclick=()=>answer(false);
   $('#fundo').onclick=()=>{ const hh=F.hist&&F.hist.pop(); if(!hh) return; restoreP(hh.id,hh.snap,hh.tot,hh.days); F.i=Math.max(0,F.i-1); (hh.ok?F.k:F.u).pop(); F.autoNext=false; save(); scrFis(l); };
-  $('#fopt').onclick=()=>fisSetup(l,true);
+  $('#fopt').onclick=()=>fisMenu(l);
   document.onkeydown=e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); flip(); } else if(e.key==='ArrowRight') answer(true); else if(e.key==='ArrowLeft') answer(false); };
 }
-function fisSetup(l,inSession){
-  const F=S.fis[l]; const s=levelStats(l);
-  const opt=Object.assign({order:'seq',range:'all'},(F&&F.opt)||{});
-  const ranges=[['all',`Wszystkie (${s.n})`],['todo',`Bez opanowanych (${s.n-s.m})`],['hard',`Tylko trudne (${s.h})`]];
-  const html=`<div><h3 style="margin:0 0 10px">Fiszki – ustawienia</h3>
-    <div class="sec">Kolejność</div><div class="seg" id="ord"><button data-v="seq" class="${opt.order==='seq'?'on':''}">Od najłatwiejszych</button><button data-v="shuf" class="${opt.order==='shuf'?'on':''}">${'Losowo'}</button></div>
-    <div class="sec">Które słówka</div><div class="seg" id="rng" style="flex-wrap:wrap">${ranges.map(r=>`<button data-v="${r[0]}" class="${opt.range===r[0]?'on':''}">${r[1]}</button>`).join('')}</div>
-    <button class="btn" id="fstart">${inSession?'Zacznij od nowa':'Start'}</button>
-    ${inSession?`<button class="btn sec2" id="fshuf">${ICON.shuf.replace('<svg','<svg width="20" height="20"')} Przetasuj pozostałe karty</button><button class="btn ghost" id="fclose">Wróć do kart</button>`:`<button class="btn ghost" data-go="l/${l}">Anuluj</button>`}</div>`;
-  const seg=(id,key)=>$$('#'+id+' button').forEach(b=>b.onclick=()=>{ opt[key]=b.dataset.v; $$('#'+id+' button').forEach(x=>x.classList.toggle('on',x===b)); });
-  const start=()=>{
-    let ids=BYLEVEL[l].filter(w=>opt.range==='all'||(opt.range==='todo'&&st(w.id)<2)||(opt.range==='hard'&&isHard(w.id))).map(w=>w.id);
-    if(!ids.length){ toast('Brak słówek w tym zakresie'); return; }
-    if(opt.order==='shuf') ids=shuffle(ids);
-    S.fis[l]={ids,i:0,k:[],u:[],opt,hist:[]}; save(); closeSheet(); scrFis(l);
-  };
-  if(inSession){ openSheet(html); } else { app().innerHTML=closeTop('Fiszki',`l/${l}`)+html; }
-  seg('ord','order'); seg('rng','range'); $('#fstart').onclick=start;
-  if(inSession){ $('#fclose').onclick=closeSheet; $('#fshuf').onclick=()=>{ const F2=S.fis[l]; const rest=shuffle(F2.ids.slice(F2.i)); F2.ids=F2.ids.slice(0,F2.i).concat(rest); F2.hist=[]; save(); closeSheet(); scrFis(l); toast('Przetasowano'); }; }
+function fisMenu(l){
+  openSheet(`<div><h3 style="margin:0 0 10px">Fiszki – opcje</h3>
+    <button class="btn sec2" id="fshuf">${ICON.shuf.replace('<svg','<svg width="20" height="20"')} Przetasuj pozostałe karty</button>
+    <button class="btn sec2" id="fnew">Nowa sesja – wybierz słówka</button>
+    <button class="btn ghost" id="fclose">Wróć do kart</button></div>`);
+  $('#fclose').onclick=closeSheet;
+  $('#fnew').onclick=()=>{ closeSheet(); goReplace('s/fis/'+l); };
+  $('#fshuf').onclick=()=>{ const F2=S.fis[l]; const rest=shuffle(F2.ids.slice(F2.i)); F2.ids=F2.ids.slice(0,F2.i).concat(rest); F2.hist=[]; save(); closeSheet(); scrFis(l); toast('Przetasowano'); };
 }
 function openSheet(html){ closeSheet(); const d=document.createElement('div'); d.className='sheet'; d.id='sheet'; d.innerHTML=html; d.onclick=e=>{ if(e.target===d) closeSheet(); }; document.body.appendChild(d); }
 function closeSheet(){ const s=$('#sheet'); if(s) s.remove(); }
@@ -264,25 +267,28 @@ function fisEnd(l){
   app().innerHTML=`${closeTop('Fiszki',`l/${l}`)}
   <div class="confetti">${u.length?'💪':'🎉'}</div><div class="res">${k} / ${F.ids.length}</div><div class="center muted">kart oznaczonych jako „umiem”</div>
   ${u.length?`<button class="btn" id="fu">Ucz się nieumianych (${u.length})</button>`:''}
-  <button class="btn sec2" data-go="learn/${l}">🎯 Przejdź do trybu Nauka</button>
+  <button class="btn sec2" data-rep="s/learn/${l}">🎯 Przejdź do trybu Nauka</button>
   <button class="btn sec2" id="fre">Zacznij od nowa</button>
-  <button class="btn ghost" data-go="l/${l}">Wróć do poziomu</button>`;
+  <button class="btn ghost" data-back="l/${l}">Wróć do poziomu</button>`;
   if(u.length) $('#fu').onclick=()=>{ S.fis[l]={ids:shuffle(u),i:0,k:[],u:[],opt:F.opt,hist:[]}; save(); scrFis(l); };
-  $('#fre').onclick=()=>{ delete S.fis[l]; save(); fisSetup(l); };
+  $('#fre').onclick=()=>{ delete S.fis[l]; save(); goReplace('s/fis/'+l); };
 }
 
 /* ---------- NAUKA (jak Learn: wybór → wpisywanie → opanowane) ---------- */
 let LS=null;
-function scrLearn(l){
+let LP=null;
+function scrLearn(l,fresh=true){
   const rev=l==='rev';
   if(!rev&&!LEVELS[l]) return go('');
   let ids;
   if(rev){ ids=dueIds().slice(0,15); if(!ids.length){ app().innerHTML=`${closeTop('Powtórki','')}<div class="confetti">🌟</div><h3 class="center">Nie masz nic do powtórki</h3><p class="center muted">Słówka, w których się pomylisz albo które opanujesz, wrócą tu do powtórki po 1, 3, 7… dniach.</p><button class="btn" data-go="">Wróć</button>`; return; } }
   else {
-    const pool=BYLEVEL[l].filter(w=>st(w.id)<2);
-    const inprog=pool.filter(w=>st(w.id)===1||isHard(w.id)), fresh=pool.filter(w=>st(w.id)===0&&!isHard(w.id));
-    ids=inprog.concat(fresh).slice(0,S.set.learnN).map(w=>w.id);
-    if(!ids.length){ app().innerHTML=`${closeTop('Nauka',`l/${l}`)}<div class="confetti">🏆</div><h3 class="center">Opanowałeś cały poziom!</h3><p class="center muted">Teraz rób powtórki i testy, żeby nie zapomnieć.</p><button class="btn" data-go="rev">🔁 Powtórki</button><button class="btn sec2" data-go="test/${l}">📝 Test</button>`; return; }
+    if(!LP||LP.l!==l||fresh){ LP={l,pool:pickIds(l,getPick('learn'),'learn'),done:[]}; }
+    const rest=LP.pool.filter(id=>!LP.done.includes(id));
+    ids=rest.slice(0,S.set.learnN);
+    if(!ids.length){
+      const allM=BYLEVEL[l].every(w=>st(w.id)===2);
+      app().innerHTML=`${closeTop('Nauka',`l/${l}`)}<div class="confetti">🏆</div><h3 class="center">${LP.pool.length?(allM?'Opanowałeś cały poziom!':'Wybrane słówka przerobione!'):'Brak słówek w tym wyborze'}</h3><p class="center muted">${LP.pool.length?'Teraz rób powtórki i testy, żeby nie zapomnieć.':'Zmień ustawienia sesji.'}</p><button class="btn" data-rep="s/learn/${l}">Wybierz słówka</button><button class="btn sec2" data-go="rev">🔁 Powtórki</button><button class="btn sec2" data-rep="s/test/${l}">📝 Test</button>`; LP=null; return; }
   }
   LS={l,rev,ids,stg:{},q:shuffle(ids),first:{},title:rev?'Powtórki':'Nauka'};
   ids.forEach(id=>LS.stg[id]=rev?1:Math.min(st(id),1));
@@ -354,26 +360,27 @@ function learnAnswer(ok,kind,typed,res){
 }
 function learnEnd(){
   const n=LS.ids.length, firstOk=Object.values(LS.first).filter(Boolean).length;
-  const back=LS.rev?'':`l/${LS.l}`; const more=LS.rev?dueIds().length:BYLEVEL[LS.l].filter(w=>st(w.id)<2).length;
+  const back=LS.rev?'':`l/${LS.l}`; if(!LS.rev&&LP) LS.ids.forEach(id=>{ if(!LP.done.includes(id)) LP.done.push(id); }); const more=LS.rev?dueIds().length:(LP?LP.pool.length-LP.done.length:0);
   const s=LS.rev?null:levelStats(LS.l);
   app().innerHTML=`${closeTop(LS.title,back)}<div class="confetti">🎉</div><div class="res">${n} ${n===1?'słówko':'słówek'}</div>
-  <div class="center muted">${LS.rev?'powtórzonych':'opanowanych w tej rundzie'} · za pierwszym razem dobrze: ${firstOk}/${n}</div>
+  <div class="center muted">${LS.rev?'powtórzonych':'przerobionych w tej rundzie'} · za pierwszym razem dobrze: ${firstOk}/${n}</div>
   ${s?`<div class="tile" style="margin-top:16px">${bar(s)}<div class="s">Poziom ${esc(LEVELS[LS.l].name)}: ${s.m}/${s.n} opanowanych</div></div>`:''}
   <div class="detbox" style="text-align:left">${LS.ids.map(id=>{ const w=BYID[id]; return `<div class="wi"><span class="dot ${LS.first[id]?'m':'h'}"></span><div class="x"><div class="a">${esc(w.w)}</div><div class="b">${esc(w.pl)}</div></div>${audBtn(w.wa,1)}</div>`; }).join('')}</div>
-  ${more?`<button class="btn" id="again">${LS.rev?`Kolejne powtórki (${more})`:'Następna runda'}</button>`:''}
-  <button class="btn ghost" data-go="${back}">Zakończ</button>`;
-  const a=$('#again'); if(a) a.onclick=()=>scrLearn(LS.rev?'rev':LS.l);
+  ${more?`<button class="btn" id="again">${LS.rev?`Kolejne powtórki (${more})`:`Następna runda (zostało ${more})`}</button>`:''}
+  <button class="btn ghost" data-back="${back}">Zakończ</button>`;
+  const a=$('#again'); if(a) a.onclick=()=>scrLearn(LS.rev?'rev':LS.l,false);
   document.onkeydown=e=>{ if(e.key==='Enter'&&a) a.click(); };
 }
 
 /* ---------- PISANIE ---------- */
 let WS=null;
-function scrWrite(l){
+let WP=null;
+function scrWrite(l,fresh=true){
   if(!LEVELS[l]) return go('');
-  const pool=BYLEVEL[l].filter(w=>st(w.id)<2);
-  const src=pool.length?pool:BYLEVEL[l];
-  const hard=src.filter(w=>isHard(w.id)), rest=src.filter(w=>!isHard(w.id));
-  const ids=hard.concat(rest.filter(w=>st(w.id)===1),rest.filter(w=>st(w.id)!==1)).slice(0,S.set.writeN).map(w=>w.id);
+  if(!WP||WP.l!==l||fresh) WP={l,pool:pickIds(l,getPick('write'),'write'),done:[]};
+  const ids=WP.pool.filter(id=>!WP.done.includes(id)).slice(0,S.set.writeN);
+  if(!ids.length){ app().innerHTML=`${closeTop('Pisanie',`l/${l}`)}<div class="confetti">${WP.pool.length?'🏆':'🤷'}</div><h3 class="center">${WP.pool.length?'Wybrane słówka przerobione!':'Brak słówek w tym wyborze'}</h3><button class="btn" data-rep="s/write/${l}">Wybierz słówka</button><button class="btn ghost" data-back="l/${l}">Wróć do poziomu</button>`; WP=null; return; }
+  ids.forEach(id=>WP.done.push(id));
   WS={l,round:1,q:shuffle(ids),wrong:[],ids,firstOk:{},done:0};
   writeNext();
 }
@@ -401,37 +408,83 @@ function writeEnd(){
   const n=WS.ids.length, ok=Object.values(WS.firstOk).filter(Boolean).length;
   app().innerHTML=`${closeTop('Pisanie',`l/${WS.l}`)}<div class="confetti">${ok===n?'🏆':'✍️'}</div><div class="res">${Math.round(ok/n*100)}%</div><div class="center muted">za pierwszym razem dobrze: ${ok}/${n}</div>
   <div class="detbox" style="text-align:left">${WS.ids.map(id=>{ const w=BYID[id]; return `<div class="wi"><span class="dot ${WS.firstOk[id]?'m':'h'}"></span><div class="x"><div class="a">${esc(w.w)}</div><div class="b">${esc(w.pl)}</div></div>${audBtn(w.wa,1)}</div>`; }).join('')}</div>
-  <button class="btn" id="again">Kolejne słówka</button><button class="btn ghost" data-go="l/${WS.l}">Zakończ</button>`;
-  $('#again').onclick=()=>scrWrite(WS.l);
+  ${WP&&WP.pool.length>WP.done.length?`<button class="btn" id="again">Kolejne słówka (zostało ${WP.pool.length-WP.done.length})</button>`:`<button class="btn" data-rep="s/write/${WS.l}">Nowa sesja</button>`}<button class="btn ghost" data-back="l/${WS.l}">Zakończ</button>`;
+  const ag=$('#again'); if(ag) ag.onclick=()=>scrWrite(WS.l,false);
 }
 
 /* ---------- TEST ---------- */
 let TS=null;
-function scrTestSetup(l){
+function scrTest(l){
   if(!LEVELS[l]) return go('');
-  const o=Object.assign({n:20,mc:true,wr:true,tf:true,src:'all'},S.set.test||{});
-  app().innerHTML=`${closeTop('Test',`l/${l}`)}<h3 style="margin:6px 0 4px">${LV_EMO[l]} ${esc(LEVELS[l].name)}</h3><p class="muted small" style="margin-top:0">Odpowiedzi poznasz dopiero na końcu – jak na prawdziwym sprawdzianie.</p>
-  <div class="set">
-   <div class="si"><div class="x">Liczba pytań</div><div class="seg" id="tn">${[10,20,30,50].map(n=>`<button data-v="${n}" class="${o.n===n?'on':''}">${n}</button>`).join('')}</div></div>
-   <div class="si"><div class="x">Wybór z 4 odpowiedzi</div><button class="sw ${o.mc?'on':''}" data-k="mc" aria-label="Wybór"></button></div>
-   <div class="si"><div class="x">Wpisywanie</div><button class="sw ${o.wr?'on':''}" data-k="wr" aria-label="Wpisywanie"></button></div>
-   <div class="si"><div class="x">Prawda / fałsz</div><button class="sw ${o.tf?'on':''}" data-k="tf" aria-label="Prawda fałsz"></button></div>
-   <div class="si"><div class="x">Słówka</div><div class="seg" id="tsrc"><button data-v="all" class="${o.src==='all'?'on':''}">Cały poziom</button><button data-v="seen" class="${o.src==='seen'?'on':''}">Już ćwiczone</button></div></div>
-  </div><button class="btn" id="tgo">Rozpocznij test</button>`;
-  $$('#tn button').forEach(b=>b.onclick=()=>{ o.n=+b.dataset.v; $$('#tn button').forEach(x=>x.classList.toggle('on',x===b)); });
-  $$('#tsrc button').forEach(b=>b.onclick=()=>{ o.src=b.dataset.v; $$('#tsrc button').forEach(x=>x.classList.toggle('on',x===b)); });
-  $$('.sw[data-k]').forEach(b=>b.onclick=()=>{ o[b.dataset.k]=!o[b.dataset.k]; b.classList.toggle('on',o[b.dataset.k]); });
-  $('#tgo').onclick=()=>{
-    const types=['mc','wr','tf'].filter(k=>o[k]); if(!types.length){ toast('Wybierz co najmniej jeden typ pytań'); return; }
-    let pool=BYLEVEL[l]; if(o.src==='seen'){ pool=pool.filter(w=>S.p[w.id]); if(pool.length<4){ toast('Za mało ćwiczonych słówek – wybierz „Cały poziom”'); return; } }
-    S.set.test=o; save();
-    const ws=shuffle(pool).slice(0,o.n);
-    const qs=ws.map((w,i)=>{ const t=types[i%types.length]; const q={id:w.id,t};
-      if(t==='mc') q.opts=shuffle([w].concat(distractors(w,3))).map(x=>x.id);
-      if(t==='tf'){ q.truth=Math.random()<.5; q.shown=q.truth?w.id:distractors(w,1)[0].id; }
-      return q; });
-    TS={l,qs:shuffle(qs),i:0,ans:[]}; testNext();
+  const o=Object.assign({mc:true,wr:true,tf:true},S.set.test||{});
+  const types=['mc','wr','tf'].filter(k=>o[k]); if(!types.length) types.push('mc','wr','tf');
+  const ws=pickIds(l,getPick('test'),'test').map(id=>BYID[id]);
+  if(!ws.length){ app().innerHTML=`${closeTop('Test',`l/${l}`)}<div class="confetti">🤷</div><h3 class="center">Brak słówek w tym wyborze</h3><button class="btn" data-rep="s/test/${l}">Zmień ustawienia</button>`; return; }
+  const qs=ws.map((w,i)=>{ const t=types[i%types.length]; const q={id:w.id,t};
+    if(t==='mc') q.opts=shuffle([w].concat(distractors(w,3))).map(x=>x.id);
+    if(t==='tf'){ q.truth=Math.random()<.5; q.shown=q.truth?w.id:distractors(w,1)[0].id; }
+    return q; });
+  TS={l,qs:shuffle(qs),i:0,ans:[]}; testNext();
+}
+
+/* ---------- WYBÓR SŁÓWEK PRZED SESJĄ (jak w Quizlecie) ---------- */
+const MODE_NAME={fis:'Fiszki',learn:'Nauka',write:'Pisanie',test:'Test'}, MODE_EMO={fis:'🃏',learn:'🎯',write:'⌨️',test:'📝'};
+const PICK_DEF={fis:{n:'all',order:'seq',range:'all'},learn:{n:'all',order:'seq',range:'todo'},write:{n:'all',order:'seq',range:'todo'},test:{n:20,order:'shuf',range:'all'}};
+const N_PRESETS=[10,20,30,50,100];
+function getPick(m){ S.set.pick=S.set.pick||{}; return Object.assign({},PICK_DEF[m],S.set.pick[m]||{}); }
+function rangeWords(l,range){ return BYLEVEL[l].filter(w=>range==='all'||(range==='todo'&&st(w.id)<2)||(range==='hard'&&isHard(w.id))||(range==='seen'&&!!S.p[w.id])); }
+function pickIds(l,o,mode){
+  let ws=rangeWords(l,o.range);
+  if(o.order==='shuf') ws=shuffle(ws);
+  else if(mode==='learn'||mode==='write'){ const a=ws.filter(w=>isHard(w.id)||st(w.id)===1), b=ws.filter(w=>!(isHard(w.id)||st(w.id)===1)); ws=a.concat(b); }
+  const n=o.n==='all'?ws.length:Math.max(1,Math.min(parseInt(o.n,10)||ws.length,ws.length));
+  return ws.slice(0,n).map(w=>w.id);
+}
+function scrSetup(mode,l){
+  const o=getPick(mode), L=LEVELS[l], F=mode==='fis'?S.fis[l]:null;
+  const t=Object.assign({mc:true,wr:true,tf:true},S.set.test||{});
+  const cnt=r=>rangeWords(l,r).length;
+  const ranges=[['all','Wszystkie'],['todo','Tylko nieumiane'],['hard','Tylko trudne'],['seen','Już ćwiczone']];
+  const isPreset=o.n==='all'||N_PRESETS.includes(+o.n);
+  app().innerHTML=`${closeTop(`${MODE_EMO[mode]} ${MODE_NAME[mode]}`,`l/${l}`)}
+  <h3 style="margin:4px 0 10px">${LV_EMO[l]} ${esc(L.name)}</h3>
+  ${F&&F.ids&&F.ids.length&&F.i<F.ids.length?`<button class="tile" id="pcont"><div class="row"><span style="font-size:22px">▶️</span><span class="t">Kontynuuj poprzednią sesję</span><span class="badge">${F.i+1}/${F.ids.length}</span></div></button>`:''}
+  <div class="sec">Ile słówek?</div>
+  <div class="nchips" id="pn"><button class="nchip wide" data-v="all">${mode==='test'?'Wszystkie':'Wszystkie (normalnie)'}</button>${N_PRESETS.map(n=>`<button class="nchip" data-v="${n}">${n}</button>`).join('')}</div>
+  <input class="tin" id="pc" type="number" inputmode="numeric" pattern="[0-9]*" min="1" placeholder="Własna liczba, np. 15" value="${isPreset?'':esc(o.n)}" style="margin-top:10px" aria-label="Własna liczba słówek">
+  <div class="sec">Które słówka?</div>
+  <div class="nchips" id="pr">${ranges.map(r=>`<button class="nchip" data-v="${r[0]}">${r[1]} <span class="cnt">${cnt(r[0])}</span></button>`).join('')}</div>
+  <div class="sec">Kolejność</div>
+  <div class="nchips" id="po"><button class="nchip" data-v="seq">Kolejno (od najłatwiejszych)</button><button class="nchip" data-v="shuf">Losowo</button></div>
+  ${mode==='test'?`<div class="sec">Rodzaje pytań</div><div class="set">
+   <div class="si"><div class="x">Wybór z 4 odpowiedzi</div><button class="sw ${t.mc?'on':''}" data-k="mc" aria-label="Wybór"></button></div>
+   <div class="si"><div class="x">Wpisywanie</div><button class="sw ${t.wr?'on':''}" data-k="wr" aria-label="Wpisywanie"></button></div>
+   <div class="si"><div class="x">Prawda / fałsz</div><button class="sw ${t.tf?'on':''}" data-k="tf" aria-label="Prawda fałsz"></button></div></div>
+   <p class="muted small">Odpowiedzi poznasz dopiero na końcu – jak na prawdziwym sprawdzianie.</p>`:''}
+  <div class="psum" id="psum"></div>
+  <button class="btn" id="pgo">${mode==='test'?'Rozpocznij test':'Start'}</button>
+  <button class="btn ghost" data-back="l/${l}">Anuluj</button>`;
+  const sync=()=>{
+    $$('#pn .nchip').forEach(b=>b.classList.toggle('on',String(o.n)===b.dataset.v));
+    $$('#pr .nchip').forEach(b=>b.classList.toggle('on',o.range===b.dataset.v));
+    $$('#po .nchip').forEach(b=>b.classList.toggle('on',o.order===b.dataset.v));
+    const av=cnt(o.range); const n=o.n==='all'?av:Math.min(parseInt(o.n,10)||0,av);
+    $('#psum').innerHTML=av?`${mode==='test'?'Pytań':'Słówek w sesji'}: <b>${n}</b> z ${av} dostępnych${mode==='learn'&&n>S.set.learnN?` · rundy po ${S.set.learnN}`:''}${mode==='write'&&n>S.set.writeN?` · rundy po ${S.set.writeN}`:''}`:'Brak słówek w tym wyborze – wybierz inne.';
+    $('#pgo').disabled=!av||!n;
   };
+  $$('#pn .nchip').forEach(b=>b.onclick=()=>{ o.n=b.dataset.v==='all'?'all':+b.dataset.v; $('#pc').value=''; sync(); });
+  $('#pc').oninput=e=>{ const v=parseInt(e.target.value,10); if(v>0){ o.n=v; } else if(!N_PRESETS.includes(+o.n)) o.n='all'; sync(); };
+  $$('#pr .nchip').forEach(b=>b.onclick=()=>{ o.range=b.dataset.v; sync(); });
+  $$('#po .nchip').forEach(b=>b.onclick=()=>{ o.order=b.dataset.v; sync(); });
+  $$('.sw[data-k]').forEach(b=>b.onclick=()=>{ t[b.dataset.k]=!t[b.dataset.k]; b.classList.toggle('on',t[b.dataset.k]); });
+  const pc=$('#pcont'); if(pc) pc.onclick=()=>goReplace('fis/'+l);
+  $('#pgo').onclick=()=>{
+    if(mode==='test'&&!t.mc&&!t.wr&&!t.tf){ toast('Wybierz co najmniej jeden rodzaj pytań'); return; }
+    S.set.pick=S.set.pick||{}; S.set.pick[mode]={n:o.n,order:o.order,range:o.range}; if(mode==='test') S.set.test=t; save();
+    if(mode==='fis'){ const ids=pickIds(l,o,'fis'); S.fis[l]={ids,i:0,k:[],u:[],opt:{order:o.order,range:o.range},hist:[]}; save(); }
+    goReplace(mode+'/'+l);
+  };
+  sync();
 }
 function testNext(){
   if(TS.i>=TS.qs.length) return testEnd();
@@ -463,7 +516,7 @@ function testEnd(){
   const pct=Math.round(ok/TS.qs.length*100);
   app().innerHTML=`${closeTop('Wynik testu',`l/${TS.l}`)}<div class="confetti">${pct>=90?'🏆':pct>=70?'👏':pct>=50?'🙂':'📚'}</div><div class="res">${pct}%</div><div class="center muted">${ok} z ${TS.qs.length} poprawnie${ok<TS.qs.length?' · błędne słówka trafiły do powtórek':''}</div>
   <div class="sec">Odpowiedzi</div>${rows.join('')}
-  <button class="btn" data-go="test/${TS.l}">Nowy test</button>${ok<TS.qs.length?`<button class="btn sec2" data-go="rev">🔁 Powtórz błędy</button>`:''}<button class="btn ghost" data-go="l/${TS.l}">Wróć do poziomu</button>`;
+  <button class="btn" data-rep="s/test/${TS.l}">Nowy test</button>${ok<TS.qs.length?`<button class="btn sec2" data-go="rev">🔁 Powtórz błędy</button>`:''}<button class="btn ghost" data-back="l/${TS.l}">Wróć do poziomu</button>`;
 }
 
 /* ---------- LISTA ---------- */
