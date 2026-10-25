@@ -69,3 +69,6 @@ document.addEventListener('click',e=>{let b=e.target.closest('[data-action="copy
 /* Swap scenario quickly while staying on screen */
 document.addEventListener('click',e=>{let b=e.target.closest('[data-scenario]');if(b){e.stopImmediatePropagation();selectedScenario=+b.dataset.scenario;render();}},true);
 /* Public optional link to educational research */
+
+/* First launch of redesigned UI: display the intended light theme once. User can switch back to dark at any time. */
+if(!S.designV2Initialized){S.designV2Initialized=true;S.theme='light';save(false);document.documentElement.classList.add('light');}
